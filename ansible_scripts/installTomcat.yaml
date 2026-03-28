@@ -1,0 +1,95 @@
+- name: Install OpenJDK 17 and Apache Tomcat
+  hosts: tomcatServers
+  become: yes
+  gather_facts: false # Disable fact gathering until connection is established
+  tasks:
+    - name: Wait for SSH connection to be available
+      ansible.builtin.wait_for_connection:
+        timeout: 600 # Wait up to 600 seconds (10 minutes)
+    - name: Gather facts manually after connection is established
+      ansible.builtin.setup:
+    # Install Java
+    - name: Download OpenJDK 17 RI tarball
+      get_url:
+        url: https://download.java.net/openjdk/jdk17.0.0.1/ri/openjdk-17.0.0.1+2_linux-x64_bin.tar.gz
+        dest: /opt/openjdk-17_linux-x64_bin.tar.gz
+        mode: '0644'
+    - name: Create /opt/java-17 directory
+      file:
+        path: /opt/java-17 
+        state: directory
+    - name: Extract OpenJDK 17 tarball
+      unarchive:
+        src: /opt/openjdk-17_linux-x64_bin.tar.gz
+        dest: /opt/java-17
+        extra_opts: [--strip-components=1]
+        remote_src: yes
+    - name: Set JAVA_HOME and PATH in /etc/profile
+      blockinfile:
+        path: /etc/profile
+        block: |
+          export JAVA_HOME=/opt/java-17
+          export PATH=$PATH:$JAVA_HOME/bin
+    - name: Source profile for current session
+      shell: source /etc/profile
+    - name: Create /opt/tomcat directory
+      file:
+        path: /opt/tomcat
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+    - name: Download Tomcat archive
+      get_url:
+        url: https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.108/bin/apache-tomcat-9.0.108.tar.gz
+        dest: /tmp/apache-tomcat.tar.gz
+    - name: Extract Tomcat
+      unarchive:
+        src: /tmp/apache-tomcat.tar.gz
+        dest: /opt/tomcat
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+        owner: ec2-user
+        group: ec2-user
+    - name: Create systemd service file for Tomcat
+      copy:
+        dest: /etc/systemd/system/tomcat.service
+        content: |
+          [Unit]
+          Description=Apache Tomcat 9 Web Application Container
+          After=network.target
+
+          [Service]
+          Type=forking
+
+          User=ec2-user
+          Group=ec2-user
+
+          Environment="JAVA_HOME=/opt/java-17"
+          Environment="CATALINA_PID=/opt/tomcat/temp/tomcat.pid"
+          Environment="CATALINA_HOME=/opt/tomcat"
+          Environment="CATALINA_BASE=/opt/tomcat"
+
+          ExecStart=/opt/tomcat/bin/startup.sh
+          ExecStop=/opt/tomcat/bin/shutdown.sh
+
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+    - name: Reload system
+      shell: systemctl daemon-reload
+    - name: Enable Tomcat service
+      systemd:
+        name: tomcat
+        enabled: yes
+    - name: Start Tomcat service
+      systemd:
+        name: tomcat
+        state: started
+    - name: Wait for Tomcat on port 8080
+      wait_for:
+        host: 127.0.0.1
+        port: 8080
+        delay: 5
+        timeout: 30

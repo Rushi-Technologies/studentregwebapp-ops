@@ -1,0 +1,2 @@
+[tomcatServers]
+172.31.35.245 ansible_user="{{ ssh_username }}"
